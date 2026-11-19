@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b1020">
+<title>Neon Snake</title>
+  <link rel="manifest" href="manifest.json">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 12px; min-height: 100vh;
+    background: #0b1020; color: #e8f0ff;
+    font-family: Arial, sans-serif; text-align: center;
+    user-select: none; -webkit-user-select: none;
+  }
+  h1 { margin: 6px 0; color: #39ff88; text-shadow: 0 0 12px #39ff88; font-size: 28px; }
+  .scores { display: flex; justify-content: center; gap: 24px; margin: 8px 0; font-size: 18px; }
+  .scores b { color: #ffd54f; }
+  canvas {
+    background: #0f1730; border: 3px solid #39ff88; border-radius: 10px;
+    box-shadow: 0 0 18px rgba(57,255,136,0.5); touch-action: none;
+  }
+  #message { margin: 10px 0; min-height: 24px; color: #9fb4ff; }
+  .btns { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+  .btns button {
+    padding: 10px 16px; font-size: 16px; border: none; border-radius: 8px;
+    background: #39ff88; color: #0b1020; font-weight: bold;
+  }
+  .btns button.alt { background: #1e2a52; color: #e8f0ff; }
+  .controls { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 14px; }
+  .controls div { display: flex; gap: 6px; }
+  .controls button {
+    width: 62px; height: 52px; font-size: 22px; border-radius: 10px;
+    border: 1px solid #2c3b70; background: #162040; color: white;
+  }
+</style>
+</head>
+<body>
+
+<h1>🐍 Neon Snake</h1>
+
+<div class="scores">
+  <div>Score: <b id="score">0</b></div>
+  <div>Best: <b id="best">0</b></div>
+</div>
+
+<canvas id="game"></canvas>
+<p id="message">Start dabao ya screen par tap karo!</p>
+
+<div class="btns">
+  <button id="start">▶ Start</button>
+  <button id="pause" class="alt">⏸ Pause</button>
+  <button id="sound" class="alt">🔊 Sound</button>
+</div>
+
+<div class="controls">
+  <button data-dir="up">⬆️</button>
+  <div>
+    <button data-dir="left">⬅️</button>
+    <button data-dir="down">⬇️</button>
+    <button data-dir="right">➡️</button>
+  </div>
+</div>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+}
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const bestEl = document.getElementById("best");
+const messageEl = document.getElementById("message");
+const startBtn = document.getElementById("start");
+const pauseBtn = document.getElementById("pause");
+const soundBtn = document.getElementById("sound");
+
+const N = 20;
+let cell = 16;
+function resizeCanvas() {
+  const px = Math.floor(Math.min(window.innerWidth - 24, 380) / N) * N;
+  canvas.width = px;
+  canvas.height = px;
+  cell = px / N;
+  draw();
+}
+
+let snake, dir, nextDir, food, score, timer;
+let running = false, paused = false, soundOn = true;
+let best = 0;
+try { best = parseInt(localStorage.getItem("neonSnakeBest")) || 0; } catch (e) {}
+bestEl.textContent = best;
+
+let audioCtx;
+function beep(freq, dur) {
+  if (!soundOn) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "square";
+    o.frequency.value = freq;
+    g.gain.value = 0.05;
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+  } catch (e) {}
+}
+
+function resetState() {
+  snake = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+  dir = { x: 1, y: 0 };
+  nextDir = dir;
+  score = 0;
+  scoreEl.textContent = 0;
+  placeFood();
+}
+
+function placeFood() {
+  do {
+    food = { x: Math.floor(Math.random() * N), y: Math.floor(Math.random() * N) };
+  } while (snake.some(s => s.x === food.x && s.y === food.y));
+}
+
+function delay() {
+  return Math.max(70, 150 - score * 3);
+}
+
+function startGame() {
+  clearTimeout(timer);
+  resetState();
+  running = true;
+  paused = false;
+  pauseBtn.textContent = "⏸ Pause";
+  startBtn.textContent = "🔄 Restart";
+  messageEl.textContent = "Khelo! Swipe ya arrows se chalao 🐍";
+  draw();
+  timer = setTimeout(tick, delay());
+}
+
+function tick() {
+  if (!running || paused) return;
+  step();
+  if (running) timer = setTimeout(tick, delay());
+}
+
+function step() {
+  dir = nextDir;
+  const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+  const hitWall = head.x < 0 || head.y < 0 || head.x >= N || head.y >= N;
+  const hitSelf = snake.some(s => s.x === head.x && s.y === head.y);
+
+  if (hitWall || hitSelf) {
+    gameOver();
+    return;
+  }
+
+  snake.unshift(head);
+  if (head.x === food.x && head.y === food.y) {
+    score++;
+    scoreEl.textContent = score;
+    beep(700, 0.08);
+    placeFood();
+  } else {
+    snake.pop();
+  }
+  draw();
+}
+
+function gameOver() {
+  running = false;
+  clearTimeout(timer);
+  beep(150, 0.4);
+  if (score > best) {
+    best = score;
+    bestEl.textContent = best;
+    try { localStorage.setItem("neonSnakeBest", best); } catch (e) {}
+    messageEl.textContent = "🎉 Naya High Score: " + score + "! Restart dabao.";
+  } else {
+    messageEl.textContent = "Game Over! Score: " + score + ". Restart dabao.";
+  }
+  draw();
+}
+
+function togglePause() {
+  if (!running) return;
+  paused = !paused;
+  pauseBtn.textContent = paused ? "▶ Resume" : "⏸ Pause";
+  messageEl.textContent = paused ? "Pause ⏸" : "Khelo! 🐍";
+  if (!paused) timer = setTimeout(tick, delay());
+  else clearTimeout(timer);
+}
+
+function draw() {
+  ctx.fillStyle = "#0f1730";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.04)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < N; i++) {
+    ctx.beginPath(); ctx.moveTo(i * cell, 0); ctx.lineTo(i * cell, canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * cell); ctx.lineTo(canvas.width, i * cell); ctx.stroke();
+  }
+
+  if (!snake) return;
+
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = "#ff4d6d";
+  ctx.fillStyle = "#ff4d6d";
+  ctx.beginPath();
+  ctx.arc(food.x * cell + cell / 2, food.y * cell + cell / 2, cell / 2 - 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.shadowColor = "#39ff88";
+  snake.forEach((s, i) => {
+    ctx.fillStyle = i === 0 ? "#b6ffd2" : "#39ff88";
+    ctx.beginPath();
+    ctx.roundRect(s.x * cell + 1, s.y * cell + 1, cell - 2, cell - 2, 5);
+    ctx.fill();
+  });
+  ctx.shadowBlur = 0;
+}
+
+function setDir(name) {
+  const map = { up: {x:0,y:-1}, down: {x:0,y:1}, left: {x:-1,y:0}, right: {x:1,y:0} };
+  const d = map[name];
+  if (!d || !dir) return;
+  if (d.x === -dir.x && d.y === -dir.y) return;
+  nextDir = d;
+}
+
+document.querySelectorAll("[data-dir]").forEach(btn => {
+  btn.addEventListener("click", () => setDir(btn.dataset.dir));
+});
+
+document.addEventListener("keydown", e => {
+  const keys = {
+    ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+    w: "up", s: "down", a: "left", d: "right"
+  };
+  if (keys[e.key]) { e.preventDefault(); setDir(keys[e.key]); }
+  if (e.key === " ") { e.preventDefault(); togglePause(); }
+});
+
+let touchX = 0, touchY = 0;
+canvas.addEventListener("touchstart", e => {
+  touchX = e.touches[0].clientX;
+  touchY = e.touches[0].clientY;
+}, { passive: true });
+
+canvas.addEventListener("touchend", e => {
+  const dx = e.changedTouches[0].clientX - touchX;
+  const dy = e.changedTouches[0].clientY - touchY;
+  if (Math.abs(dx) < 20 && Math.abs(dy) < 20) {
+    if (!running) startGame();
+    return;
+  }
+  if (Math.abs(dx) > Math.abs(dy)) setDir(dx > 0 ? "right" : "left");
+  else setDir(dy > 0 ? "down" : "up");
+}, { passive: true });
+
+startBtn.addEventListener("click", startGame);
+pauseBtn.addEventListener("click", togglePause);
+soundBtn.addEventListener("click", () => {
+  soundOn = !soundOn;
+  soundBtn.textContent = soundOn ? "🔊 Sound" : "🔇 Mute";
+});
+
+window.addEventListener("resize", resizeCanvas);
+resetState();
+resizeCanvas();
+</script>
+
+</body>
+</html>
