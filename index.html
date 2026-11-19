@@ -62,10 +62,10 @@
     <button data-dir="right">➡️</button>
   </div>
 </div>
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js");
-}
 <script>
+  if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+  } 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const scoreEl = document.getElementById("score");
